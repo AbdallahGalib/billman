@@ -1,0 +1,173 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom opacity utilities for compatibility */
+@layer utilities {
+  .text-base-content\/70 { @apply text-base-content text-opacity-70; }
+  .text-base-content\/60 { @apply text-base-content text-opacity-60; }
+  .text-base-content\/50 { @apply text-base-content text-opacity-50; }
+  .text-base-content\/40 { @apply text-base-content text-opacity-40; }
+  .text-base-content\/30 { @apply text-base-content text-opacity-30; }
+  .text-base-content\/20 { @apply text-base-content text-opacity-20; }
+  
+  .bg-primary\/10 { @apply bg-primary bg-opacity-10; }
+  .bg-base-200\/50 { @apply bg-base-200 bg-opacity-50; }
+  .border-base-content\/30 { @apply border-base-content border-opacity-30; }
+}
+
+/* Custom styles for the application */
+.chart-container {
+  position: relative;
+  height: 400px;
+  width: 100%;
+}
+
+.transaction-table {
+  overflow-x: auto;
+}
+
+.editable-cell {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.editable-cell:hover {
+  background-color: hsl(var(--b2));
+}
+
+.editable-cell:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--p));
+}
+
+.file-drop-zone {
+  border: 2px dashed hsl(var(--bc) / 0.2);
+  border-radius: 0.5rem;
+  padding: 2rem;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.file-drop-zone.drag-over {
+  border-color: hsl(var(--p));
+  background-color: hsl(var(--p) / 10%);
+}
+
+.loading-spinner {
+  animation: spin 1s linear infinite;
+  border-radius: 50%;
+  height: 2rem;
+  width: 2rem;
+  border: 2px solid transparent;
+  border-bottom-color: hsl(var(--p));
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* PWA specific styles */
+.pwa-install-prompt {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 50;
+}
+
+/* Chart responsive styles */
+@media (max-width: 768px) {
+  .chart-container {
+    height: 300px;
+  }
+}
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background-color: hsl(var(--b2));
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--b3));
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--bc) / 0.2);
+}
+
+/* Desktop optimizations */
+@media (min-width: 1024px) {
+  .container {
+    max-width: 1200px;
+  }
+  
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+  
+  .chart-container {
+    height: 450px;
+  }
+}
+
+/* Ensure proper spacing and layout */
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.navbar {
+  backdrop-filter: blur(10px);
+}
+
+.card {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.btn {
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+/* Table improvements */
+.table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  background-color: hsl(var(--b1));
+  z-index: 10;
+}
+
+/* Mobile improvements */
+@media (max-width: 640px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+  
+  .navbar-center {
+    display: none;
+  }
+  
+  .table {
+    font-size: 0.875rem;
+  }
+  
+  .table th,
+  .table td {
+    padding: 0.5rem 0.25rem;
+  }
+}
