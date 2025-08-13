@@ -1,24 +1,32 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { Transaction, ParseResult, FileUploadEvent } from '../lib/types';
+  import type { Transaction, ParseResult, FileUploadEvent, FilterState, Category, FilterPreset } from '../lib/types';
   import { WhatsAppParser } from '../lib/services/whatsappParser';
   import { TransactionManager } from '../lib/services/transactionManager';
   import { SupabaseService } from '../lib/services/supabase';
+  import { FilterService } from '../lib/services/filterService';
+  import { CategoryService } from '../lib/services/categoryService';
   import FileUpload from '../lib/components/FileUpload.svelte';
   import TransactionTable from '../lib/components/TransactionTable.svelte';
   import AnalyticsCharts from '../lib/components/AnalyticsCharts.svelte';
   import BillingView from '../lib/components/BillingView.svelte';
   import PeriodSelector from '../lib/components/PeriodSelector.svelte';
+  import FilterControls from '../lib/components/FilterControls.svelte';
+  import CategoryManager from '../lib/components/CategoryManager.svelte';
+  import HierarchicalTransactionView from '../lib/components/HierarchicalTransactionView.svelte';
   import { formatNumber, formatCurrency, filterTransactionsByPeriod } from '../lib/utils/helpers';
 
   // Services
   let parser: WhatsAppParser;
   let transactionManager: TransactionManager;
   let supabaseService: SupabaseService;
+  let filterService: FilterService;
+  let categoryService: CategoryService;
 
   // State
   let transactions: Transaction[] = [];
-  let currentView: 'dashboard' | 'upload' | 'transactions' | 'billing' = 'dashboard';
+  let categories: Category[] = [];
+  let currentView: 'dashboard' | 'upload' | 'transactions' | 'billing' | 'categories' = 'dashboard';
   let isLoading = false;
   let isProcessing = false;
   let isSyncing = false;
@@ -26,7 +34,18 @@
   let success: string | null = null;
   let parseResult: ParseResult | null = null;
   
-  // Period filtering
+  // Filtering and categorization
+  let currentFilters: FilterState = {
+    categories: [],
+    items: [],
+    senders: [],
+    dateRange: { start: null, end: null },
+    amountRange: { min: null, max: null }
+  };
+  let showHierarchicalView = true;
+  let selectedTransactionIds: string[] = [];
+  
+  // Period filtering (legacy - will be replaced by FilterControls)
   let startMonth: string = '';
   let endMonth: string = '';
 
@@ -35,6 +54,8 @@
     try {
       parser = new WhatsAppParser();
       transactionManager = new TransactionManager();
+      filterService = new FilterService();
+      categoryService = new CategoryService();
       
       // Try to initialize Supabase (optional)
       try {
@@ -47,81 +68,70 @@
         console.warn('Supabase not configured or unavailable');
       }
 
-      // Load existing transactions (auto-loading disabled)
-      loadTransactions();
+      // Load existing data
+      await loadTransactions();
+      await loadCategories();
+      
+      // Load persisted filters
+      currentFilters = filterService.loadPersistedFilters();
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to initialize application';
     }
   });
 
-  // Load transactions.txt file manually
-  async function loadTransactionsFromFile() {
-    try {
-      isProcessing = true;
-      error = null;
-      success = null;
 
-      console.log('🚀 Starting manual load of transactions.txt');
 
-      // Fetch the transactions.txt file from the public directory
-      const response = await fetch('/transactions.txt');
-      if (!response.ok) {
-        throw new Error(`Could not load transactions.txt file: ${response.status} ${response.statusText}`);
-      }
-      
-      const content = await response.text();
-      console.log(`📄 File loaded, content length: ${content.length} characters`);
-      console.log(`📄 First 500 characters:`, content.substring(0, 500));
-      
-      // Ensure parser is initialized
-      if (!parser) {
-        console.log('🔧 Initializing parser...');
-        parser = new WhatsAppParser();
-      }
-      
-      console.log('🔍 Starting parsing...');
-      // Parse the file content
-      const result = await parser.parseFile(content);
-      parseResult = result;
-
-      console.log('📊 Parse result:', result);
-
-      if (result.transactions.length > 0) {
-        console.log('✅ Transactions found, adding to manager...');
-        // Clear existing transactions and add new ones
-        await transactionManager.clearAllTransactions();
-        await transactionManager.addTransactions(result.transactions);
-        loadTransactions(); // Refresh the UI
-        
-        success = `Loaded ${result.transactions.length} transactions from transactions.txt`;
-        if (result.errors.length > 0) {
-          success += ` (${result.errors.length} errors encountered)`;
-        }
-        console.log('✅ Success:', success);
-      } else {
-        error = `No transactions found in transactions.txt file. Processed ${result.summary.totalLines} lines, found ${result.summary.failedLines} errors.`;
-        console.log('❌ No transactions found');
-        console.log('📊 Summary:', result.summary);
-        console.log('❌ Errors:', result.errors);
-      }
-    } catch (err) {
-      console.error('❌ Load error:', err);
-      error = err instanceof Error ? err.message : 'Failed to load transactions.txt';
-    } finally {
-      isProcessing = false;
-    }
-  }
-
-  function loadTransactions() {
+  async function loadTransactions() {
     try {
       if (!transactionManager) {
         transactionManager = new TransactionManager();
       }
       transactions = transactionManager.getTransactions();
+      
+      // Auto-assign categories to new transactions
+      if (categoryService && transactions.length > 0) {
+        await autoAssignCategories();
+      }
     } catch (err) {
       console.error('Load transactions error:', err);
       transactions = [];
       error = 'Failed to load transactions';
+    }
+  }
+
+  async function loadCategories() {
+    try {
+      if (!categoryService) {
+        categoryService = new CategoryService();
+      }
+      categories = await categoryService.getCategories();
+    } catch (err) {
+      console.error('Load categories error:', err);
+      categories = [];
+    }
+  }
+
+  async function autoAssignCategories() {
+    try {
+      const uncategorizedTransactions = transactions.filter(t => !t.categoryId);
+      let assignedCount = 0;
+
+      for (const transaction of uncategorizedTransactions) {
+        const suggestedCategory = await categoryService.suggestCategoryForItem(transaction.item);
+        if (suggestedCategory) {
+          await transactionManager.updateTransaction(transaction.id, { 
+            categoryId: suggestedCategory.id 
+          });
+          assignedCount++;
+        }
+      }
+
+      if (assignedCount > 0) {
+        await loadTransactions(); // Reload to get updated transactions
+        success = `Auto-assigned categories to ${assignedCount} transactions`;
+      }
+    } catch (err) {
+      console.warn('Auto-assignment failed:', err);
     }
   }
 
@@ -150,7 +160,10 @@
         if (result.transactions.length > 0) {
           // Add transactions to manager
           await transactionManager.addTransactions(result.transactions);
-          loadTransactions();
+          await loadTransactions();
+
+          // Auto-assign categories to new transactions
+          await autoAssignCategories();
 
           success = `Successfully parsed ${result.transactions.length} transactions`;
           if (result.errors.length > 0) {
@@ -258,11 +271,32 @@
   // Export functions
   function exportTransactions(format: 'json' | 'csv') {
     try {
-      const data = format === 'json' ? 
-        transactionManager.exportToJSON() : 
-        transactionManager.exportToCSV();
+      // Use filtered transactions for export
+      const transactionsToExport = filteredTransactions;
       
-      const filename = `transactions-${new Date().toISOString().split('T')[0]}.${format}`;
+      let data: string;
+      if (format === 'json') {
+        data = JSON.stringify(transactionsToExport, null, 2);
+      } else {
+        // CSV export with category information
+        const headers = ['Date', 'Sender', 'Item', 'Amount', 'Category'];
+        const rows = transactionsToExport.map(t => [
+          t.date.toISOString().split('T')[0],
+          t.sender,
+          t.item,
+          t.amount.toString(),
+          t.categoryId ? (categories.find(c => c.id === t.categoryId)?.name || 'Unknown') : 'Uncategorized'
+        ]);
+        
+        data = [headers, ...rows].map(row => 
+          row.map(cell => `"${cell.toString().replace(/"/g, '""')}"`).join(',')
+        ).join('\n');
+      }
+      
+      // Include filter info in filename if filters are active
+      const hasFilters = filterService?.hasActiveFilters(currentFilters);
+      const filterSuffix = hasFilters ? '-filtered' : '';
+      const filename = `transactions${filterSuffix}-${new Date().toISOString().split('T')[0]}.${format}`;
       const mimeType = format === 'json' ? 'application/json' : 'text/csv';
       
       const blob = new Blob([data], { type: mimeType });
@@ -275,10 +309,66 @@
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       
-      success = `Exported ${transactions.length} transactions as ${format.toUpperCase()}`;
+      const exportedCount = transactionsToExport.length;
+      success = `Exported ${exportedCount} ${hasFilters ? 'filtered ' : ''}transactions as ${format.toUpperCase()}`;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to export transactions';
     }
+  }
+
+  // Filter handling
+  function handleFiltersChanged(event: CustomEvent<FilterState>) {
+    currentFilters = event.detail;
+    filterService.setCurrentFilters(currentFilters);
+  }
+
+  function handlePresetSaved(event: CustomEvent<{ name: string; filters: FilterState }>) {
+    success = `Filter preset "${event.detail.name}" saved successfully`;
+  }
+
+  function handlePresetApplied(event: CustomEvent<FilterPreset>) {
+    success = `Applied filter preset "${event.detail.name}"`;
+  }
+
+  // Category handling
+  async function handleCategoryCreated(event: CustomEvent<Category>) {
+    categories = [...categories, event.detail];
+    success = `Category "${event.detail.name}" created successfully`;
+  }
+
+  async function handleCategoryUpdated(event: CustomEvent<Category>) {
+    const index = categories.findIndex(c => c.id === event.detail.id);
+    if (index !== -1) {
+      categories[index] = event.detail;
+      categories = categories; // Trigger reactivity
+    }
+    success = `Category "${event.detail.name}" updated successfully`;
+  }
+
+  async function handleCategoryDeleted(event: CustomEvent<string>) {
+    categories = categories.filter(c => c.id !== event.detail);
+    // Remove category from transactions
+    transactions = transactions.map(t => 
+      t.categoryId === event.detail ? { ...t, categoryId: undefined } : t
+    );
+    success = 'Category deleted successfully';
+  }
+
+  async function handleCategoriesAssigned(event: CustomEvent<{ transactionIds: string[]; categoryId: string }>) {
+    const { transactionIds, categoryId } = event.detail;
+    
+    // Update transactions with new category
+    for (const id of transactionIds) {
+      await transactionManager.updateTransaction(id, { categoryId });
+    }
+    
+    await loadTransactions();
+    success = `Assigned category to ${transactionIds.length} transactions`;
+  }
+
+  // Hierarchical view handling
+  function handleSelectionChanged(event: CustomEvent<{ selectedIds: string[] }>) {
+    selectedTransactionIds = event.detail.selectedIds;
   }
 
   // Clear messages
@@ -316,8 +406,39 @@
     endMonth = event.detail.endMonth;
   }
 
-  // Filtered transactions based on period
-  $: filteredTransactions = filterTransactionsByPeriod(transactions, startMonth, endMonth);
+  // Apply filters to transactions
+  $: filteredTransactions = (() => {
+    let result = transactions;
+    
+    // Apply new filter system
+    if (filterService && filterService.hasActiveFilters(currentFilters)) {
+      result = filterService.applyFilters(result, currentFilters);
+    }
+    
+    // Apply legacy period filtering if no date filters are active
+    if (!currentFilters.dateRange.start && !currentFilters.dateRange.end && (startMonth || endMonth)) {
+      result = filterTransactionsByPeriod(result, startMonth, endMonth);
+    }
+    
+    return result;
+  })();
+
+  // Get available filter options
+  $: filterOptions = (() => {
+    if (!filterService || !transactions.length) {
+      return {
+        categories: [],
+        items: [],
+        senders: [],
+        dateRange: null,
+        amountRange: null
+      };
+    }
+    return filterService.getAvailableFilterOptions(transactions, categories);
+  })();
+
+  // Get selected transactions for category assignment
+  $: selectedTransactions = transactions.filter(t => selectedTransactionIds.includes(t.id));
 
   // Statistics based on filtered transactions
   $: stats = (() => {
@@ -386,6 +507,7 @@
           <li><button on:click={() => currentView = 'dashboard'}>Dashboard</button></li>
           <li><button on:click={() => currentView = 'upload'}>Upload</button></li>
           <li><button on:click={() => currentView = 'transactions'}>Transactions</button></li>
+          <li><button on:click={() => currentView = 'categories'}>Categories</button></li>
           <li><button on:click={() => currentView = 'billing'}>Billing</button></li>
         </ul>
       </div>
@@ -418,6 +540,14 @@
             on:click={() => currentView = 'transactions'}
           >
             Transactions ({formatNumber(transactions.length)})
+          </button>
+        </li>
+        <li>
+          <button 
+            class="btn btn-ghost {currentView === 'categories' ? 'btn-active' : ''}"
+            on:click={() => currentView = 'categories'}
+          >
+            Categories ({categories.length})
           </button>
         </li>
         <li>
@@ -521,12 +651,25 @@
           </div>
         </div>
 
-        <!-- Period Selector -->
-        <PeriodSelector 
-          {startMonth}
-          {endMonth}
-          on:periodChange={handlePeriodChange}
+        <!-- Filter Controls -->
+        <FilterControls
+          {currentFilters}
+          availableCategories={categories}
+          availableItems={filterOptions.items.map(i => i.name)}
+          availableSenders={filterOptions.senders.map(s => s.name)}
+          on:filtersChanged={handleFiltersChanged}
+          on:presetSaved={handlePresetSaved}
+          on:presetApplied={handlePresetApplied}
         />
+
+        <!-- Legacy Period Selector (for backward compatibility) -->
+        {#if !filterService?.hasActiveFilters(currentFilters)}
+          <PeriodSelector 
+            {startMonth}
+            {endMonth}
+            on:periodChange={handlePeriodChange}
+          />
+        {/if}
 
         <!-- Analytics Charts -->
         <AnalyticsCharts 
@@ -541,9 +684,9 @@
               <div class="max-w-md">
                 <h1 class="text-5xl font-bold">📱</h1>
                 <h2 class="text-3xl font-bold py-6">No Transactions Found</h2>
-                <p class="py-6">Auto-loading has been disabled. Click the button below to manually load and parse transactions.txt with the enhanced parser.</p>
-                <button class="btn btn-primary" on:click={loadTransactionsFromFile} disabled={isProcessing}>
-                  {isProcessing ? 'Loading...' : 'Load Transactions.txt'}
+                <p class="py-6">Upload a WhatsApp chat export file to get started with analyzing your purchase history.</p>
+                <button class="btn btn-primary" on:click={() => currentView = 'upload'}>
+                  Upload File
                 </button>
               </div>
             </div>
@@ -553,8 +696,8 @@
             <div class="hero-content text-center">
               <div class="max-w-md">
                 <h1 class="text-5xl font-bold">⏳</h1>
-                <h2 class="text-3xl font-bold py-6">Loading Transactions</h2>
-                <p class="py-6">Auto-loading and parsing transactions.txt file...</p>
+                <h2 class="text-3xl font-bold py-6">Processing Transactions</h2>
+                <p class="py-6">Parsing and analyzing your transaction data...</p>
                 <div class="loading loading-spinner loading-lg"></div>
               </div>
             </div>
@@ -566,32 +709,17 @@
       <!-- Upload View -->
       <div class="max-w-4xl mx-auto">
         <div class="text-center mb-8">
-          <h1 class="text-4xl font-bold text-base-content mb-4">Auto-Loading Transactions</h1>
+          <h1 class="text-4xl font-bold text-base-content mb-4">Upload Transaction File</h1>
           <p class="text-lg text-base-content/70">
-            The app automatically loads transactions from transactions.txt on startup
+            Upload your WhatsApp chat export file to analyze your purchase history
           </p>
         </div>
 
-        <div class="alert alert-info">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
-          <div>
-            <h3 class="font-bold">Manual Loading</h3>
-            <div class="text-xs">Auto-loading has been disabled. Use the button below to manually load transactions.txt with the enhanced parser.</div>
-          </div>
-        </div>
-
-        <div class="text-center mt-6">
-          <button class="btn btn-primary btn-lg" on:click={loadTransactionsFromFile} disabled={isProcessing}>
-            {#if isProcessing}
-              <span class="loading loading-spinner"></span>
-              Processing...
-            {:else}
-              📄 Load Transactions.txt
-            {/if}
-          </button>
-        </div>
+        <!-- File Upload Component -->
+        <FileUpload 
+          on:fileSelect={handleFileUpload}
+          disabled={isProcessing}
+        />
 
         <!-- Parse Results -->
         {#if parseResult}
@@ -643,6 +771,13 @@
         <div class="flex justify-between items-center">
           <h1 class="text-3xl font-bold">Transactions</h1>
           <div class="flex gap-2">
+            <button 
+              class="btn btn-outline btn-sm"
+              class:btn-active={showHierarchicalView}
+              on:click={() => showHierarchicalView = !showHierarchicalView}
+            >
+              {showHierarchicalView ? 'Table View' : 'Drill-Down View'}
+            </button>
             <button class="btn btn-outline btn-sm" on:click={() => exportTransactions('csv')}>
               Export CSV
             </button>
@@ -652,31 +787,85 @@
           </div>
         </div>
 
-        <!-- Period Selector for Transactions -->
-        <PeriodSelector 
-          {startMonth}
-          {endMonth}
-          on:periodChange={handlePeriodChange}
+        <!-- Filter Controls -->
+        <FilterControls
+          {currentFilters}
+          availableCategories={categories}
+          availableItems={filterOptions.items.map(i => i.name)}
+          availableSenders={filterOptions.senders.map(s => s.name)}
+          on:filtersChanged={handleFiltersChanged}
+          on:presetSaved={handlePresetSaved}
+          on:presetApplied={handlePresetApplied}
         />
 
-        <TransactionTable 
-          transactions={filteredTransactions}
-          loading={isLoading}
-          on:edit={handleTransactionEdit}
-          on:delete={handleTransactionDelete}
-          on:bulkDelete={handleBulkDelete}
+        <!-- Category Assignment for Selected Transactions -->
+        {#if selectedTransactions.length > 0}
+          <div class="bg-base-100 p-4 rounded-lg shadow">
+            <CategoryManager
+              {categories}
+              {selectedTransactions}
+              mode="assign"
+              on:categoryCreated={handleCategoryCreated}
+              on:categoriesAssigned={handleCategoriesAssigned}
+            />
+          </div>
+        {/if}
+
+        <!-- Transaction Views -->
+        {#if showHierarchicalView}
+          <HierarchicalTransactionView
+            transactions={filteredTransactions}
+            {categories}
+            on:transactionEdit={handleTransactionEdit}
+            on:transactionDelete={handleTransactionDelete}
+            on:selectionChanged={handleSelectionChanged}
+          />
+        {:else}
+          <TransactionTable 
+            transactions={filteredTransactions}
+            loading={isLoading}
+            on:edit={handleTransactionEdit}
+            on:delete={handleTransactionDelete}
+            on:bulkDelete={handleBulkDelete}
+          />
+        {/if}
+      </div>
+
+    {:else if currentView === 'categories'}
+      <!-- Categories View -->
+      <div class="space-y-6">
+        <CategoryManager
+          {categories}
+          selectedTransactions={[]}
+          mode="manage"
+          on:categoryCreated={handleCategoryCreated}
+          on:categoryUpdated={handleCategoryUpdated}
+          on:categoryDeleted={handleCategoryDeleted}
         />
       </div>
 
     {:else if currentView === 'billing'}
       <!-- Billing View -->
       <div class="space-y-6">
-        <!-- Period Selector for Billing -->
-        <PeriodSelector 
-          {startMonth}
-          {endMonth}
-          on:periodChange={handlePeriodChange}
+        <!-- Filter Controls for Billing -->
+        <FilterControls
+          {currentFilters}
+          availableCategories={categories}
+          availableItems={filterOptions.items.map(i => i.name)}
+          availableSenders={filterOptions.senders.map(s => s.name)}
+          on:filtersChanged={handleFiltersChanged}
+          on:presetSaved={handlePresetSaved}
+          on:presetApplied={handlePresetApplied}
         />
+
+        <!-- Legacy Period Selector (for backward compatibility) -->
+        {#if !filterService?.hasActiveFilters(currentFilters)}
+          <PeriodSelector 
+            {startMonth}
+            {endMonth}
+            on:periodChange={handlePeriodChange}
+          />
+        {/if}
         
         <BillingView transactions={filteredTransactions} />
       </div>

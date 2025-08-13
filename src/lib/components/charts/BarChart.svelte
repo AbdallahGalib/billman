@@ -7,6 +7,39 @@
   // Register Chart.js components
   Chart.register(...registerables);
 
+  // Simple data labels plugin (inline implementation)
+  const dataLabelsPlugin = {
+    id: 'datalabels',
+    afterDatasetsDraw(chart: any) {
+      const { ctx, data } = chart;
+      
+      chart.data.datasets.forEach((dataset: any, datasetIndex: number) => {
+        const meta = chart.getDatasetMeta(datasetIndex);
+        
+        meta.data.forEach((bar: any, index: number) => {
+          const value = dataset.data[index];
+          if (value > 0) {
+            ctx.save();
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillStyle = '#374151';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            
+            const text = formatCurrency(value);
+            const x = bar.x;
+            const y = bar.y - 5;
+            
+            ctx.fillText(text, x, y);
+            ctx.restore();
+          }
+        });
+      });
+    }
+  };
+
+  // Register the plugin
+  Chart.register(dataLabelsPlugin);
+
   // Props
   export let data: ChartData;
   export let options: ChartOptions = {};

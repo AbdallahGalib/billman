@@ -159,10 +159,46 @@ export function calculatePercentage(value: number, total: number): number {
 
 export function getMonthName(monthIndex: number): string {
   const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
   ];
   return months[monthIndex] || '';
+}
+
+// Helper function to determine which 15th-to-15th period a transaction belongs to
+export function getMonthPeriodFor15thCycle(transactionDate: Date): {
+  year: number;
+  month: number;
+  startDate: Date;
+  endDate: Date;
+} {
+  const day = transactionDate.getDate();
+  const month = transactionDate.getMonth();
+  const year = transactionDate.getFullYear();
+
+  if (day >= 15) {
+    // Transaction is in the period starting from 15th of this month
+    // Period ends on 14th of next month, so we label it as next month
+    const nextMonth = month + 1;
+    const nextYear = nextMonth > 11 ? year + 1 : year;
+    const adjustedMonth = nextMonth > 11 ? 0 : nextMonth;
+    
+    return {
+      year: nextYear,
+      month: adjustedMonth + 1, // 1-based month
+      startDate: new Date(year, month, 15),
+      endDate: new Date(nextYear, adjustedMonth, 14)
+    };
+  } else {
+    // Transaction is in the period that started from 15th of previous month
+    // Period ends on 14th of current month, so we label it as current month
+    return {
+      year: year,
+      month: month + 1, // 1-based month
+      startDate: new Date(month === 0 ? year - 1 : year, month === 0 ? 11 : month - 1, 15),
+      endDate: new Date(year, month, 14)
+    };
+  }
 }
 
 export function downloadFile(content: string, filename: string, mimeType: string = 'text/plain'): void {

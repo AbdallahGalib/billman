@@ -7,7 +7,7 @@ import type {
   ChartOptions,
   FilterConfig 
 } from '../types';
-import { groupBy, calculatePercentage, getMonthName, generateColors } from '../utils/helpers';
+import { groupBy, calculatePercentage, getMonthName, generateColors, getMonthPeriodFor15thCycle } from '../utils/helpers';
 
 export class AnalyticsEngine {
   private transactions: Transaction[] = [];
@@ -56,30 +56,32 @@ export class AnalyticsEngine {
 
   // Monthly spending analysis
   private calculateMonthlySpending(transactions: Transaction[]): MonthlyTotal[] {
-    const monthMap = new Map<string, { total: number; transactionCount: number; year: number }>();
+    const monthMap = new Map<string, { total: number; transactionCount: number; year: number; monthIndex: number }>();
 
     transactions.forEach(transaction => {
       const date = transaction.date;
-      const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+      const monthPeriod = getMonthPeriodFor15thCycle(date);
+      const monthKey = `${monthPeriod.year}-${monthPeriod.month}`;
       
       const existing = monthMap.get(monthKey) || { 
         total: 0, 
         transactionCount: 0, 
-        year: date.getFullYear() 
+        year: monthPeriod.year,
+        monthIndex: monthPeriod.month - 1 // Convert to 0-based index for getMonthName
       };
       
       monthMap.set(monthKey, {
         total: existing.total + transaction.amount,
         transactionCount: existing.transactionCount + 1,
-        year: date.getFullYear()
+        year: monthPeriod.year,
+        monthIndex: monthPeriod.month - 1
       });
     });
 
     return Array.from(monthMap.entries())
       .map(([key, data]) => {
-        const [year, monthIndex] = key.split('-').map(Number);
         return {
-          month: getMonthName(monthIndex),
+          month: getMonthName(data.monthIndex),
           year: data.year,
           total: data.total,
           transactionCount: data.transactionCount
@@ -92,6 +94,8 @@ export class AnalyticsEngine {
         return aMonthIndex - bMonthIndex;
       });
   }
+
+
 
   // Chart data generation
   generatePieChartData(itemDistribution: ItemCount[], maxItems: number = 50): ChartData {

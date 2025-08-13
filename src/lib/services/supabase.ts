@@ -334,7 +334,8 @@ export class SupabaseService {
           return {
             month: date.toLocaleString('default', { month: 'long' }),
             year: parseInt(year),
-            ...stats
+            total: stats.total,
+            transactionCount: stats.transactionCount
           };
         })
         .sort((a, b) => {

@@ -86,14 +86,16 @@
       
       uploadProgress = 100;
 
-      // Dispatch complete event
+      // Dispatch complete event with enhanced metadata
       dispatch('fileSelect', {
         type: 'complete',
         progress: 100,
         result: {
           content,
           filename: file.name,
-          size: file.size
+          size: file.size,
+          lastModified: new Date(file.lastModified),
+          type: file.type
         }
       });
 
@@ -278,7 +280,8 @@
   }
 
   .file-drop-zone:hover:not(.drag-over) {
-    @apply border-base-content/30 bg-base-200/50;
+    border-color: hsl(var(--bc) / 0.3);
+    background-color: hsl(var(--b2) / 0.5);
   }
 
   .file-drop-zone.border-error {

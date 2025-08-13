@@ -8,6 +8,18 @@ export interface Transaction {
   amount: number;
   originalMessage?: string;
   flags?: string[];
+  categoryId?: string;
+  category?: Category;
+  confidence?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +72,27 @@ export interface FilterConfig {
   amountRange?: AmountRange;
 }
 
+export interface FilterState {
+  categories: string[];
+  items: string[];
+  senders: string[];
+  dateRange: {
+    start: Date | null;
+    end: Date | null;
+  };
+  amountRange: {
+    min: number | null;
+    max: number | null;
+  };
+}
+
+export interface FilterPreset {
+  id: string;
+  name: string;
+  filters: FilterState;
+  createdAt: Date;
+}
+
 export interface DateRange {
   start: Date;
   end: Date;
@@ -104,15 +137,15 @@ export interface ChartDataset {
 }
 
 export interface ChartOptions {
-  responsive: boolean;
-  maintainAspectRatio: boolean;
+  responsive?: boolean;
+  maintainAspectRatio?: boolean;
   plugins?: {
     legend?: {
-      display: boolean;
+      display?: boolean;
       position?: 'top' | 'bottom' | 'left' | 'right';
     };
     tooltip?: {
-      enabled: boolean;
+      enabled?: boolean;
       callbacks?: any;
     };
   };
@@ -228,6 +261,8 @@ export interface FileUploadEvent {
     content: string;
     filename: string;
     size: number;
+    lastModified?: Date;
+    type?: string;
   };
 }
 
@@ -273,4 +308,45 @@ export interface BillingSummary {
   monthlyBills: MonthBill[];
   dailyBills: DayBill[];
   grandTotal: number;
+}
+
+// Category-related types
+export interface CategoryUsageStats {
+  categoryId: string;
+  categoryName: string;
+  transactionCount: number;
+  totalAmount: number;
+  averageAmount: number;
+  lastUsed: Date;
+}
+
+export interface CategoryAnalytics {
+  totalCategories: number;
+  categorizedTransactions: number;
+  uncategorizedTransactions: number;
+  categoryBreakdown: CategoryUsageStats[];
+  topCategories: CategoryUsageStats[];
+}
+
+export interface TrendData {
+  period: string;
+  date: Date;
+  totalAmount: number;
+  transactionCount: number;
+  categoryBreakdown: { [categoryId: string]: number };
+}
+
+export interface ComparisonData {
+  name: string;
+  value: number;
+  percentage: number;
+  change?: number;
+}
+
+export interface AnalyticsInsight {
+  type: 'trend' | 'anomaly' | 'pattern' | 'recommendation';
+  title: string;
+  description: string;
+  severity: 'low' | 'medium' | 'high';
+  data?: any;
 }
