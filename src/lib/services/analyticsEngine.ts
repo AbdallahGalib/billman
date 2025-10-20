@@ -139,13 +139,32 @@ export class AnalyticsEngine {
 
   generateNonFrequentItemsChartData(nonFrequentItems: ItemCount[]): ChartData {
     const labels = nonFrequentItems.map(item => item.item);
-    const data = nonFrequentItems.map(item => item.count); // Use count instead of totalAmount
+    const data = nonFrequentItems.map(item => item.count);
     const colors = generateColors(labels.length);
 
     return {
       labels,
       datasets: [{
-        label: 'Occasional Items (≤3 purchases) - Purchase Count',
+        label: 'All Items - Purchase Count',
+        data,
+        backgroundColor: colors,
+        borderColor: colors.map(color => color.replace('0.8', '1')),
+        borderWidth: 2
+      }]
+    };
+  }
+
+  generateAllItemsChartData(itemDistribution: ItemCount[], type: 'amount' | 'count'): ChartData {
+    const labels = itemDistribution.map(item => item.item);
+    const data = type === 'amount' 
+      ? itemDistribution.map(item => item.totalAmount)
+      : itemDistribution.map(item => item.count);
+    const colors = generateColors(labels.length);
+
+    return {
+      labels,
+      datasets: [{
+        label: type === 'amount' ? 'Total Spending' : 'Purchase Count',
         data,
         backgroundColor: colors,
         borderColor: colors.map(color => color.replace('0.8', '1')),

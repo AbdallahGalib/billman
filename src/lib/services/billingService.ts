@@ -119,28 +119,48 @@ export class BillingService {
       currentStart = new Date(startDate.getFullYear(), startDate.getMonth() - 1, 15);
     }
 
-    console.log(`🗓️ Generating month periods from ${startDate.toDateString()} to ${endDate.toDateString()}`);
-    console.log(`🗓️ Starting from: ${currentStart.toDateString()}`);
+    // Ensure we don't go to previous year if month is negative (January)
+    if (currentStart.getMonth() < 0) {
+      currentStart = new Date(currentStart.getFullYear() - 1, 11, 15);
+    }
 
-    while (currentStart <= endDate) {
+    // Make sure we generate at least one period
+    let iterations = 0;
+    const maxIterations = 1000; // Safety check to prevent infinite loops
+
+    while (currentStart <= endDate && iterations < maxIterations) {
       // End date is 14th of next month
       const currentEnd = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 14);
       
-      // Don't go beyond the requested end date
-      const periodEnd = currentEnd > endDate ? endDate : currentEnd;
+      // Handle month overflow (December to January)
+      if (currentEnd.getMonth() < currentStart.getMonth()) {
+        currentEnd.setFullYear(currentEnd.getFullYear() + 1);
+      }
       
-      console.log(`🗓️ Period: ${currentStart.toDateString()} - ${periodEnd.toDateString()}`);
+      // Don't go beyond the requested end date - use the minimum of currentEnd and endDate
+      const periodEnd = currentEnd > endDate ? new Date(endDate) : new Date(currentEnd);
       
       periods.push({
         startDate: new Date(currentStart),
-        endDate: periodEnd
+        endDate: new Date(periodEnd) // Make sure we create a new Date object
       });
 
       // Move to next month period (15th of next month)
       currentStart = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 15);
+      
+      // Handle month overflow (December to January)
+      if (currentStart.getMonth() > 11) {
+        currentStart.setFullYear(currentStart.getFullYear() + 1);
+        currentStart.setMonth(0);
+      }
+      
+      iterations++;
     }
 
-    console.log(`🗓️ Generated ${periods.length} periods`);
+    if (iterations >= maxIterations) {
+      console.error('⚠️ Max iterations reached in generateMonthPeriods - possible infinite loop');
+    }
+
     return periods;
   }
 
@@ -223,12 +243,32 @@ export class BillingService {
     // Generate month periods
     const periods = this.generateMonthPeriods(earliestDate, latestDate);
     
-    return periods.map(period => ({
-      month: period.endDate.toLocaleString('default', { month: 'long' }),
-      year: period.endDate.getFullYear(),
-      startDate: period.startDate,
-      endDate: period.endDate
-    }));
+    return periods.map(period => {
+      // For the month label, we need to determine which cycle this period belongs to
+      // The cycle is determined by the 15th-to-14th rule:
+      // - Period from Dec 15 to Jan 14 is labeled as "January"
+      // - Period from Jan 15 to Feb 14 is labeled as "February"
+      // etc.
+      
+      // The label should be the month that contains the 14th of the period
+      // For a period that starts on the 15th of a month, it ends on the 14th of the next month
+      // So we label it with the month that contains the 14th
+      
+      // But for partial periods (where endDate is not the full 14th), we still label it
+      // according to the cycle it belongs to
+      
+      // Determine the cycle month:
+      // If the period starts on the 15th of a month, it belongs to the cycle that ends
+      // on the 14th of the next month, so we label it with that next month
+      const cycleMonth = new Date(period.startDate.getFullYear(), period.startDate.getMonth() + 1, 1);
+      
+      return {
+        month: cycleMonth.toLocaleString('default', { month: 'long' }),
+        year: cycleMonth.getFullYear(),
+        startDate: period.startDate,
+        endDate: period.endDate
+      };
+    });
   }
 
   /**

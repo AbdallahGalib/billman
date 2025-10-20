@@ -28,6 +28,7 @@ export class WhatsAppParser {
   async parseFile(content: string): Promise<ParseResult> {
     const startTime = performance.now();
     const errors: ParseError[] = [];
+    const suspiciousTransactions: SuspiciousTransaction[] = [];
 
     // Step 1: Pre-parsing - Remove "বিবরণ" prefixes but preserve WhatsApp message format
     const lines = content.split('\n');
@@ -43,8 +44,9 @@ export class WhatsAppParser {
       }
     }
 
-    // Step 2: Parse with enhanced filtering
+    // Step 2: Parse with enhanced filtering and validation
     const allTransactions = this.enhancedContextBasedParsing(processedLines, errors);
+    const suspicious: SuspiciousTransaction[] = [];
 
     // Step 3: Group similar items using context-based categorizing
     const groupedTransactions = this.contextBasedCategorizing(allTransactions);
@@ -63,25 +65,17 @@ export class WhatsAppParser {
       processingTime
     };
 
-    // Final sender breakdown
-    const finalSenderCounts = uniqueTransactions.reduce((acc, t) => {
-      acc[t.sender] = (acc[t.sender] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
     console.log('🎯 FINAL PARSING RESULTS:');
     console.log(`  📊 Total lines: ${lines.length}`);
     console.log(`  ✅ Successful transactions: ${uniqueTransactions.length}`);
-    console.log(`  👥 Final transactions by sender:`, finalSenderCounts);
+    console.log(`  🚨 Suspicious transactions: ${suspiciousTransactions.length}`);
     console.log(`  ❌ Failed lines: ${errors.length}`);
-    console.log(`  🔄 Duplicates skipped: ${duplicatesSkipped}`);
-    console.log(`  ⏱️ Processing time: ${processingTime.toFixed(2)}ms`);
-    console.log(`  📦 Sample transactions:`, uniqueTransactions.slice(0, 10).map(t => `${t.sender}: ${t.item} ${t.amount}`));
 
     return {
       transactions: uniqueTransactions,
       errors,
-      summary
+      summary,
+      suspiciousTransactions
     };
   }
 
@@ -128,9 +122,9 @@ export class WhatsAppParser {
           // Process the message part only for Monir with valid date (case insensitive)
           if (currentDate && currentSender.toLowerCase() === 'monir') {
             console.log(`  🎯 Processing message from ${currentSender}: "${message}"`);
-            const lineTransactions = this.extractFromTextEnhanced(message, currentSender, currentDate, i + 1);
-            console.log(`  📦 Extracted ${lineTransactions.length} transactions from message`);
-            transactions.push(...lineTransactions);
+            const result = this.validateAndExtractTransactions(message, currentSender, currentDate, i + 1);
+            console.log(`  📦 Extracted ${result.transactions.length} transactions from message`);
+            transactions.push(...result.transactions);
             monirMessageCount++;
           } else if (currentDate && currentSender.toLowerCase() !== 'monir') {
             console.log(`  ⏭️ Skipping message from ${currentSender} (only processing Monir)`);
@@ -166,9 +160,9 @@ export class WhatsAppParser {
 
           // Only process continuation lines if the current sender is Monir (case insensitive)
           if (useSender.toLowerCase() === 'monir') {
-            const lineTransactions = this.extractFromTextEnhanced(line, useSender, useDate, i + 1);
-            console.log(`  📦 Extracted ${lineTransactions.length} transactions from line`);
-            transactions.push(...lineTransactions);
+            const result = this.validateAndExtractTransactions(line, useSender, useDate, i + 1);
+            console.log(`  📦 Extracted ${result.transactions.length} transactions from line`);
+            transactions.push(...result.transactions);
           } else {
             console.log(`  ⏭️ Skipping continuation line from ${useSender} (only processing Monir)`);
           }
@@ -198,6 +192,111 @@ export class WhatsAppParser {
     console.log(`  ❌ Errors encountered: ${errors.length}`);
 
     return transactions;
+  }
+
+  private validateAndExtractTransactions(text: string, sender: string, date: Date, lineNumber: number): { transactions: Transaction[]; suspicious: SuspiciousTransaction[] } {
+    const transactions: Transaction[] = [];
+    const suspicious: SuspiciousTransaction[] = [];
+
+    // Convert Bengali numerals first
+    const convertedText = this.convertBengaliNumerals(text);
+
+    // Check for "কেনা" (bought) pattern with Bengali or English numbers
+    const kenaMatch = convertedText.match(/কেনা\s+(\d+)/i);
+    if (kenaMatch) {
+      const totalAmount = parseFloat(kenaMatch[1]);
+      
+      // Create a single transaction with the total "কেনা" amount
+      // Extract item description from "বিবরণ" section if available
+      const descriptionMatch = convertedText.match(/বিবরণ\s+(.+?)(?=\s*moriom|$)/i);
+      const itemDescription = descriptionMatch ? descriptionMatch[1].trim() : 'purchase';
+      
+      transactions.push({
+        id: generateId(),
+        date: new Date(date),
+        sender,
+        item: itemDescription,
+        amount: totalAmount,
+        originalMessage: text,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      
+      return { transactions, suspicious };
+    }
+
+    // Fallback to original parsing if no "কেনা" pattern found
+    const pairs = this.findSimpleItemAmountPairs(convertedText);
+    const actualTotal = pairs.reduce((sum, pair) => sum + pair.amount, 0);
+
+    // Find items without amounts
+    const itemsWithoutAmounts = this.findItemsWithoutAmounts(convertedText, pairs);
+
+    // Handle transactions without amounts
+    if (pairs.length === 0 && itemsWithoutAmounts.length === 0) {
+      const itemOnlyMatch = convertedText.match(/বিবরণ\s+([a-zA-Z\u0980-\u09FF]+)\s*$/i);
+      if (itemOnlyMatch) {
+        const item = itemOnlyMatch[1].trim();
+        if (this.isValidItem(item)) {
+          suspicious.push({
+            id: generateId(),
+            date: new Date(date),
+            sender,
+            originalMessage: text,
+            reason: 'no_amount',
+            extractedItems: [{ item: this.standardizeTerminology(item) }]
+          });
+        }
+      }
+    }
+
+    if (itemsWithoutAmounts.length > 0) {
+      suspicious.push({
+        id: generateId(),
+        date: new Date(date),
+        sender,
+        originalMessage: text,
+        reason: 'missing_items',
+        extractedItems: [...pairs.map(p => ({ item: p.item, amount: p.amount })), ...itemsWithoutAmounts]
+      });
+    }
+
+    // Create transactions for valid pairs
+    for (const pair of pairs) {
+      if (pair.amount > 0 && this.isValidItem(pair.item)) {
+        transactions.push({
+          id: generateId(),
+          date: new Date(date),
+          sender,
+          item: pair.item,
+          amount: pair.amount,
+          originalMessage: text,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      }
+    }
+
+    return { transactions, suspicious };
+  }
+
+  private findItemsWithoutAmounts(text: string, existingPairs: { item: string; amount: number }[]): { item: string }[] {
+    const itemsWithoutAmounts: { item: string }[] = [];
+    const existingItems = new Set(existingPairs.map(p => p.item.toLowerCase()));
+
+    // Find standalone items (words that look like items but have no associated number)
+    const words = text.split(/\s+/);
+    for (const word of words) {
+      const cleanWord = word.replace(/[^a-zA-Z\u0980-\u09FF]/g, '');
+      if (cleanWord.length > 2 && 
+          this.isValidItem(cleanWord) && 
+          !existingItems.has(cleanWord.toLowerCase()) &&
+          !/\d/.test(word)) {
+        itemsWithoutAmounts.push({ item: cleanWord });
+      }
+    }
+
+    return itemsWithoutAmounts;
   }
 
   private contextBasedParsing(content: string): Transaction[] {
@@ -642,6 +741,33 @@ export class WhatsAppParser {
       'rc': 'rc cola',
       'coff': 'coffee',
       'koyel': 'koyel',
+      'koyel60': 'koyel',
+      'koyle': 'koyel',
+      'koyl': 'koyel',
+      'tel': 'oil',
+      'teel': 'oil',
+      'teil': 'oil',
+      'chal': 'rice',
+      'chaal': 'rice',
+      'chall': 'rice',
+      'alo': 'potato',
+      'aloo': 'potato',
+      'aluu': 'potato',
+      'dim': 'eggs',
+      'deem': 'eggs',
+      'dimm': 'eggs',
+      'piaz': 'onion',
+      'piyaz': 'onion',
+      'peaz': 'onion',
+      'rosun': 'garlic',
+      'roshun': 'garlic',
+      'rosoon': 'garlic',
+      'saban': 'soap',
+      'sabun': 'soap',
+      'sabon': 'soap',
+      'rc': 'rc cola',
+      'arr': 'rc cola',
+      'arsi': 'rc cola',
       'majoni': 'mayonnaise',
       'mosla': 'spice',
       'chini': 'sugar',
@@ -679,7 +805,28 @@ export class WhatsAppParser {
 
     // Apply case-insensitive mapping
     const lowerItem = item.toLowerCase();
-    return ITEM_MAP[lowerItem] || item;
+    
+    // First check exact match
+    if (ITEM_MAP[lowerItem]) {
+      return ITEM_MAP[lowerItem];
+    }
+    
+    // Check for typos by removing trailing numbers
+    const withoutNumbers = lowerItem.replace(/\d+$/, '');
+    if (ITEM_MAP[withoutNumbers]) {
+      return ITEM_MAP[withoutNumbers];
+    }
+    
+    // Check for partial matches (typos)
+    for (const [key, value] of Object.entries(ITEM_MAP)) {
+      if (key.includes(lowerItem) || lowerItem.includes(key)) {
+        if (Math.abs(key.length - lowerItem.length) <= 2) {
+          return value;
+        }
+      }
+    }
+    
+    return item;
   }
 
   private findItemAmountPairsEnhanced(text: string): { item: string; amount: number }[] {
@@ -792,13 +939,14 @@ export class WhatsAppParser {
 
       // Check if current word is text and next word is number
       if (/^[a-zA-Z\u0980-\u09FF]/.test(currentWord) && /^\d+(\.\d+)?$/.test(nextWord)) {
-        const item = currentWord.trim();
+        const rawItem = currentWord.trim();
+        const standardizedItem = this.standardizeTerminology(rawItem);
         const amount = parseFloat(nextWord);
 
         // Skip invalid items (phone numbers, system words) and unrealistic amounts
-        if (this.isValidItem(item) && amount > 0 && amount <= 1000) {
-          console.log(`      ✅ Found pair: "${item}" (${amount})`);
-          pairs.push({ item, amount });
+        if (this.isValidItem(rawItem) && amount > 0 && amount <= 1000) {
+          console.log(`      ✅ Found pair: "${rawItem}" → "${standardizedItem}" (${amount})`);
+          pairs.push({ item: standardizedItem, amount });
         } else {
           console.log(`      ❌ Skipped invalid: "${item}" (${amount}) - reason: ${!this.isValidItem(item) ? 'invalid item' : amount <= 0 ? 'invalid amount' : 'amount too high'}`);
         }
@@ -811,12 +959,22 @@ export class WhatsAppParser {
       for (const match of attachedMatches) {
         const result = match.match(/([a-zA-Z\u0980-\u09FF]+)(\d+)/);
         if (result) {
-          const item = result[1].trim();
-          const amount = parseFloat(result[2]);
-
-          if (this.isValidItem(item) && amount > 0 && amount <= 1000) {
-            console.log(`      ✅ Found attached: "${item}" (${amount})`);
-            pairs.push({ item, amount });
+          const rawItem = result[1].trim();
+          const attachedNumber = parseFloat(result[2]);
+          
+          // Check if this looks like a typo (item name + number that's not a price)
+          const standardizedItem = this.standardizeTerminology(rawItem + result[2]);
+          const isTypo = standardizedItem !== (rawItem + result[2]);
+          
+          if (isTypo) {
+            // This is a typo, use the corrected item name but look for actual price
+            console.log(`      🔧 Typo detected: "${rawItem + result[2]}" → "${standardizedItem}"`);
+            // Don't use the attached number as price for typos
+            continue;
+          } else if (this.isValidItem(rawItem) && attachedNumber > 0 && attachedNumber <= 1000) {
+            const finalItem = this.standardizeTerminology(rawItem);
+            console.log(`      ✅ Found attached: "${rawItem}" → "${finalItem}" (${attachedNumber})`);
+            pairs.push({ item: finalItem, amount: attachedNumber });
           } else {
             console.log(`      ❌ Skipped invalid attached: "${item}" (${amount}) - reason: ${!this.isValidItem(item) ? 'invalid item' : amount <= 0 ? 'invalid amount' : 'amount too high'}`);
           }

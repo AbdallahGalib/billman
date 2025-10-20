@@ -5,6 +5,7 @@
   import { TransactionManager } from '../services/transactionManager';
   import PieChart from './charts/PieChart.svelte';
   import BarChart from './charts/BarChart.svelte';
+  import ComparisonModal from './ComparisonModal.svelte';
   import { formatCurrency, formatNumber } from '../utils/helpers';
 
   // Props
@@ -18,6 +19,7 @@
   let analyticsData: AnalyticsData | null = null;
   let selectedView: 'overview' | 'trends' | 'insights' = 'overview';
   let frequencyAnalysis: any = null;
+  let showComparisonModal = false;
 
   // Initialize analytics engine
   onMount(() => {
@@ -52,13 +54,13 @@
     frequencyAnalysis = tempManager.getItemFrequencyAnalysis();
   }
 
-  // Chart data generation
-  $: frequentItemsChartData = frequencyAnalysis ? 
-    analyticsEngine.generateFrequentItemsChartData(frequencyAnalysis.frequent) : 
+  // Chart data generation - show all items
+  $: frequentItemsChartData = analyticsData ? 
+    analyticsEngine.generateAllItemsChartData(analyticsData.itemDistribution, 'amount') : 
     { labels: [], datasets: [] };
 
-  $: nonFrequentItemsChartData = frequencyAnalysis ? 
-    analyticsEngine.generateNonFrequentItemsChartData(frequencyAnalysis.nonFrequent) : 
+  $: nonFrequentItemsChartData = analyticsData ? 
+    analyticsEngine.generateAllItemsChartData(analyticsData.itemDistribution, 'count') : 
     { labels: [], datasets: [] };
 
   $: barChartData = analyticsData ? 
@@ -98,24 +100,34 @@
     <h2 class="text-2xl font-bold text-base-content mb-4 sm:mb-0">Analytics Dashboard</h2>
     
     <!-- View selector -->
-    <div class="tabs tabs-boxed">
+    <div class="flex gap-4 items-center">
+      <div class="tabs tabs-boxed">
+        <button 
+          class="tab {selectedView === 'overview' ? 'tab-active' : ''}"
+          on:click={() => selectedView = 'overview'}
+        >
+          Overview
+        </button>
+        <button 
+          class="tab {selectedView === 'trends' ? 'tab-active' : ''}"
+          on:click={() => selectedView = 'trends'}
+        >
+          Trends
+        </button>
+        <button 
+          class="tab {selectedView === 'insights' ? 'tab-active' : ''}"
+          on:click={() => selectedView = 'insights'}
+        >
+          Insights
+        </button>
+      </div>
+      
       <button 
-        class="tab {selectedView === 'overview' ? 'tab-active' : ''}"
-        on:click={() => selectedView = 'overview'}
+        class="btn btn-outline btn-sm"
+        on:click={() => showComparisonModal = true}
+        disabled={!transactions.length}
       >
-        Overview
-      </button>
-      <button 
-        class="tab {selectedView === 'trends' ? 'tab-active' : ''}"
-        on:click={() => selectedView = 'trends'}
-      >
-        Trends
-      </button>
-      <button 
-        class="tab {selectedView === 'insights' ? 'tab-active' : ''}"
-        on:click={() => selectedView = 'insights'}
-      >
-        Insights
+        📊 Compare Months
       </button>
     </div>
   </div>
@@ -167,31 +179,25 @@
 
       <!-- Charts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        <!-- Frequent Items Chart -->
+        <!-- All Items Chart -->
         <div class="card bg-base-100 shadow-xl">
           <div class="card-body">
             <PieChart 
               data={frequentItemsChartData}
               options={pieChartOptions}
-              title="Frequently Bought Items (>3 purchases)"
+              title="All Items by Total Spending"
               height={400}
             />
-            {#if frequencyAnalysis && frequencyAnalysis.frequent.length === 0}
-              <div class="text-center text-base-content/50 py-8">
-                <p>No frequently bought items yet</p>
-                <p class="text-sm">Items with more than {frequencyAnalysis.threshold} purchases will appear here</p>
-              </div>
-            {/if}
           </div>
         </div>
 
-        <!-- Non-Frequent Items Chart -->
+        <!-- Items by Count Chart -->
         <div class="card bg-base-100 shadow-xl">
           <div class="card-body">
             <PieChart 
               data={nonFrequentItemsChartData}
               options={pieChartOptions}
-              title="Occasionally Bought Items (≤3 purchases)"
+              title="All Items by Purchase Count"
               height={400}
             />
           </div>
@@ -349,6 +355,13 @@
     </div>
   {/if}
 </div>
+
+<!-- Comparison Modal -->
+<ComparisonModal 
+  {transactions}
+  bind:isOpen={showComparisonModal}
+  on:close={() => showComparisonModal = false}
+/>
 
 <style>
   .analytics-container {

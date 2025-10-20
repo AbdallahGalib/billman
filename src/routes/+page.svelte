@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Transaction, ParseResult, FileUploadEvent, FilterState, Category, FilterPreset } from '../lib/types';
-  import { WhatsAppParser } from '../lib/services/whatsappParser';
+  import { ReliableParser } from '../lib/services/reliableParser';
   import { TransactionManager } from '../lib/services/transactionManager';
   import { SupabaseService } from '../lib/services/supabase';
   import { FilterService } from '../lib/services/filterService';
@@ -14,6 +14,7 @@
   import FilterControls from '../lib/components/FilterControls.svelte';
   import CategoryManager from '../lib/components/CategoryManager.svelte';
   import HierarchicalTransactionView from '../lib/components/HierarchicalTransactionView.svelte';
+  import SuspiciousTransactions from '../lib/components/SuspiciousTransactions.svelte';
   import { formatNumber, formatCurrency, filterTransactionsByPeriod } from '../lib/utils/helpers';
 
   // Services
@@ -26,13 +27,14 @@
   // State
   let transactions: Transaction[] = [];
   let categories: Category[] = [];
-  let currentView: 'dashboard' | 'upload' | 'transactions' | 'billing' | 'categories' = 'dashboard';
+  let currentView: 'dashboard' | 'upload' | 'transactions' | 'billing' | 'categories' | 'suspicious' = 'dashboard';
   let isLoading = false;
   let isProcessing = false;
   let isSyncing = false;
   let error: string | null = null;
   let success: string | null = null;
   let parseResult: ParseResult | null = null;
+  let suspiciousTransactions: any[] = [];
   
   // Filtering and categorization
   let currentFilters: FilterState = {
@@ -52,7 +54,7 @@
   // Initialize services
   onMount(async () => {
     try {
-      parser = new WhatsAppParser();
+      parser = new ReliableParser();
       transactionManager = new TransactionManager();
       filterService = new FilterService();
       categoryService = new CategoryService();
@@ -147,7 +149,7 @@
       try {
         // Ensure parser and transaction manager are initialized
         if (!parser) {
-          parser = new WhatsAppParser();
+          parser = new ReliableParser();
         }
         if (!transactionManager) {
           transactionManager = new TransactionManager();
@@ -156,6 +158,7 @@
         // Parse the file content
         const result = await parser.parseFile(uploadEvent.result.content);
         parseResult = result;
+        suspiciousTransactions = result.suspiciousTransactions || [];
 
         if (result.transactions.length > 0) {
           // Add transactions to manager
@@ -509,6 +512,7 @@
           <li><button on:click={() => currentView = 'transactions'}>Transactions</button></li>
           <li><button on:click={() => currentView = 'categories'}>Categories</button></li>
           <li><button on:click={() => currentView = 'billing'}>Billing</button></li>
+          <li><button on:click={() => currentView = 'suspicious'}>Suspicious</button></li>
         </ul>
       </div>
       <a href="/" class="btn btn-ghost normal-case text-xl">
@@ -556,6 +560,14 @@
             on:click={() => currentView = 'billing'}
           >
             Billing
+          </button>
+        </li>
+        <li>
+          <button 
+            class="btn btn-ghost {currentView === 'suspicious' ? 'btn-active' : ''}"
+            on:click={() => currentView = 'suspicious'}
+          >
+            Suspicious ({suspiciousTransactions.length})
           </button>
         </li>
       </ul>
@@ -869,6 +881,10 @@
         
         <BillingView transactions={filteredTransactions} />
       </div>
+
+    {:else if currentView === 'suspicious'}
+      <!-- Suspicious Transactions View -->
+      <SuspiciousTransactions {suspiciousTransactions} />
     {/if}
   </main>
 

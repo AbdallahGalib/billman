@@ -350,10 +350,72 @@ export class TransactionManager {
     const timeDiff = Math.abs(existing.date.getTime() - newTransaction.date.getTime());
     const fiveMinutes = 5 * 60 * 1000;
 
-    return existing.sender === newTransaction.sender &&
+    // Enhanced duplicate detection for incremental uploads:
+    // Also consider as duplicate if same sender, item, amount, and very close date (within 1 day)
+    // This helps when re-uploading files with slightly different timestamps
+    const oneDay = 24 * 60 * 60 * 1000;
+    
+    const sameBasicInfo = existing.sender === newTransaction.sender &&
       existing.item === newTransaction.item &&
-      existing.amount === newTransaction.amount &&
-      timeDiff < fiveMinutes;
+      existing.amount === newTransaction.amount;
+
+    // Strict duplicate check (5 minutes)
+    if (sameBasicInfo && timeDiff < fiveMinutes) {
+      return true;
+    }
+
+    // Relaxed duplicate check for incremental uploads (1 day) - only if original message is very similar
+    if (sameBasicInfo && timeDiff < oneDay) {
+      // If original messages exist, check if they're very similar
+      if (existing.originalMessage && newTransaction.originalMessage) {
+        // Normalize messages for comparison (remove extra spaces, convert to lowercase)
+        const normalizeMsg = (msg: string) => msg.toLowerCase().replace(/\s+/g, ' ').trim();
+        const normalizedExisting = normalizeMsg(existing.originalMessage);
+        const normalizedNew = normalizeMsg(newTransaction.originalMessage);
+        
+        // If messages are very similar (Levenshtein distance < 10% of message length)
+        const distance = this.levenshteinDistance(normalizedExisting, normalizedNew);
+        const maxLength = Math.max(normalizedExisting.length, normalizedNew.length);
+        
+        if (distance / maxLength < 0.1) {
+          return true;
+        }
+      }
+      
+      // If no original messages or messages are not similar, still consider as duplicate
+      // if the date difference is very small and all other fields match
+      if (timeDiff < 30 * 60 * 1000) { // 30 minutes
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // Levenshtein distance algorithm for string similarity
+  private levenshteinDistance(str1: string, str2: string): number {
+    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+
+    for (let i = 0; i <= str1.length; i++) {
+      matrix[0][i] = i;
+    }
+
+    for (let j = 0; j <= str2.length; j++) {
+      matrix[j][0] = j;
+    }
+
+    for (let j = 1; j <= str2.length; j++) {
+      for (let i = 1; i <= str1.length; i++) {
+        const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1, // deletion
+          matrix[j - 1][i] + 1, // insertion
+          matrix[j - 1][i - 1] + indicator // substitution
+        );
+      }
+    }
+
+    return matrix[str2.length][str1.length];
   }
 
   // Statistics

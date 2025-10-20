@@ -49,6 +49,18 @@ export interface ParseResult {
   transactions: Transaction[];
   errors: ParseError[];
   summary: ParseSummary;
+  suspiciousTransactions: SuspiciousTransaction[];
+}
+
+export interface SuspiciousTransaction {
+  id: string;
+  date: Date;
+  sender: string;
+  originalMessage: string;
+  reason: 'missing_items' | 'total_mismatch' | 'no_amount';
+  expectedTotal?: number;
+  actualTotal?: number;
+  extractedItems: { item: string; amount?: number }[];
 }
 
 export interface ParseError {
