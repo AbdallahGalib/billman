@@ -7,6 +7,7 @@
   import { FilterService } from '../lib/services/filterService';
   import { CategoryService } from '../lib/services/categoryService';
   import FileUpload from '../lib/components/FileUpload.svelte';
+  import TextToCSVConverter from '../lib/components/TextToCSVConverter.svelte';
   import TransactionTable from '../lib/components/TransactionTable.svelte';
   import AnalyticsCharts from '../lib/components/AnalyticsCharts.svelte';
   import BillingView from '../lib/components/BillingView.svelte';
@@ -155,8 +156,8 @@
           transactionManager = new TransactionManager();
         }
 
-        // Parse the file content
-        const result = await parser.parseFile(uploadEvent.result.content);
+        // Parse the file content (CSV format)
+        const result = uploadEvent.result.parseResult || await parser.parseFile(uploadEvent.result.content);
         parseResult = result;
         suspiciousTransactions = result.suspiciousTransactions || [];
 
@@ -723,9 +724,12 @@
         <div class="text-center mb-8">
           <h1 class="text-4xl font-bold text-base-content mb-4">Upload Transaction File</h1>
           <p class="text-lg text-base-content/70">
-            Upload your WhatsApp chat export file to analyze your purchase history
+            First convert your WhatsApp text to CSV, then upload the CSV file
           </p>
         </div>
+
+        <!-- Text to CSV Converter -->
+        <TextToCSVConverter />
 
         <!-- File Upload Component -->
         <FileUpload 

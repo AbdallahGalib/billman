@@ -79,14 +79,33 @@
       
       uploadProgress = 50;
       
-      // Simulate processing time for large files
-      if (file.size > 1024 * 1024) { // 1MB
-        await new Promise(resolve => setTimeout(resolve, 500));
+      // Parse content based on file type
+      let parseResult;
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        const { CSVParser } = await import('../services/csvParser');
+        const parser = new CSVParser();
+        const transactions = parser.parseCSV(content);
+        parseResult = {
+          transactions,
+          errors: [],
+          summary: {
+            totalLines: content.split('\n').length,
+            successfulTransactions: transactions.length,
+            failedLines: 0,
+            duplicatesSkipped: 0,
+            processingTime: 0
+          },
+          suspiciousTransactions: []
+        };
+      } else {
+        const { WhatsAppParser } = await import('../services/whatsappParser');
+        const parser = new WhatsAppParser();
+        parseResult = await parser.parseFile(content);
       }
       
       uploadProgress = 100;
 
-      // Dispatch complete event with enhanced metadata
+      // Dispatch complete event with parsed data
       dispatch('fileSelect', {
         type: 'complete',
         progress: 100,
@@ -95,7 +114,8 @@
           filename: file.name,
           size: file.size,
           lastModified: new Date(file.lastModified),
-          type: file.type
+          type: file.type,
+          parseResult
         }
       });
 
@@ -131,8 +151,9 @@
     }
 
     // Additional checks
-    if (!file.name.toLowerCase().endsWith('.txt')) {
-      return { isValid: false, error: 'Please select a .txt file' };
+    const fileName = file.name.toLowerCase();
+    if (!fileName.endsWith('.csv') && !fileName.endsWith('.txt')) {
+      return { isValid: false, error: 'Please select a .csv or .txt file' };
     }
 
     return { isValid: true };
@@ -154,7 +175,7 @@
   <input
     bind:this={fileInputElement}
     type="file"
-    accept=".txt,text/plain"
+    accept=".csv,.txt,text/csv,text/plain"
     on:change={handleFileInput}
     class="hidden"
     {disabled}
@@ -177,7 +198,7 @@
       <div class="flex flex-col items-center space-y-4">
         <div class="loading-spinner"></div>
         <div class="text-center">
-          <p class="text-lg font-medium">Processing file...</p>
+          <p class="text-lg font-medium">Parsing transactions...</p>
           <div class="w-64 bg-base-200 rounded-full h-2 mt-2">
             <div 
               class="bg-primary h-2 rounded-full transition-all duration-300"
@@ -207,10 +228,10 @@
 
         <div class="text-center">
           <p class="text-xl font-semibold text-base-content">
-            {isDragOver ? 'Drop your file here' : 'Upload WhatsApp Chat File'}
+            {isDragOver ? 'Drop your file here' : 'Upload CSV or TXT File'}
           </p>
           <p class="text-base-content/70 mt-2">
-            Drag and drop your .txt file here, or click to browse
+            Upload CSV (converted) or TXT (WhatsApp export) files
           </p>
           <p class="text-sm text-base-content/50 mt-1">
             Maximum file size: {getFileSize(maxSize)}
@@ -255,13 +276,11 @@
   <div class="mt-6 p-4 bg-base-200 rounded-lg">
     <h4 class="font-semibold text-base-content mb-2">Supported Format</h4>
     <p class="text-sm text-base-content/70 mb-2">
-      Upload a WhatsApp chat export file (.txt) containing purchase transactions.
+      Upload CSV (Date,Item,Amount) or TXT (WhatsApp export) files.
     </p>
     <div class="text-xs text-base-content/60">
-      <p class="mb-1"><strong>Expected format:</strong></p>
-      <code class="bg-base-300 px-2 py-1 rounded">
-        DD/MM/YYYY, HH:MM [am/pm] - Sender: item amount
-      </code>
+      <p class="mb-1"><strong>CSV format:</strong> Date,Item,Amount</p>
+      <p class="mb-1"><strong>TXT format:</strong> DD/MM/YYYY, HH:MM - Sender: Message</p>
     </div>
   </div>
 </div>

@@ -63,9 +63,9 @@ export const fileSchema: ValidationSchema = {
   type: {
     required: true,
     custom: (value: string) => {
-      const allowedTypes = ['text/plain', 'application/txt'];
+      const allowedTypes = ['text/plain', 'application/txt', 'text/csv', 'application/csv'];
       if (!allowedTypes.includes(value)) {
-        return 'Only .txt files are allowed';
+        return 'Only .txt and .csv files are allowed';
       }
       return true;
     }
